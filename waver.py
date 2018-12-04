@@ -1,14 +1,20 @@
 #!/usr/bin/python
+"""
+(c) G. Flores 2018, where applicable
+"""
 import numpy as np
 from noter import Noter 
-# based on : www.daniweb.com/code/snippet263775.html
-# https://stackoverflow.com/a/33913403
+
 import math
 import wave
 import struct
+import scipy.optimize
+#import matplotlib.pyplot as plt
 
 class Waver:
 
+    # Code based on https://stackoverflow.com/a/33913403
+    # which in turn was based on www.daniweb.com/code/snippet263775.html
     def __init__(self, init_samples=None, sample_rate=44100.0, default_ms=500, channels=None):
         self.channels = channels if channels is not None else 1
         if init_samples is None:
@@ -20,6 +26,7 @@ class Waver:
             self.channels = len(self.samples[0])
         self.sample_rate = sample_rate
         self.default_ms = default_ms
+        self.freqs = [ [] for _ in range(self.channels) ]
 
     def append_silence(self, ms=None, channel=0):
         """
@@ -30,6 +37,7 @@ class Waver:
 
         for _ in range(int(num_samples)): 
             self.samples[channel].append(0.0)
+        self.freqs[channel].append(0)
 
     def append_sinewave(self, note=440.0, ms=None, volume=1.0, channel=0):
         """
@@ -49,10 +57,14 @@ class Waver:
         for x in range(int(num_samples)):
             self.samples[channel].append(volume * math.sin(2 * math.pi * freq * ( x / self.sample_rate )))
 
+        self.freqs[channel].append(note)
+
     def append_sinewave_single_channel(self, note=440.0, ms=None, volume=1.0):
         self.append_sinewave(note, ms, volume, channel=0)
         for ch in range(1, self.channels):
             self.append_silence(ms, channel=ch)
+            self.freqs[ch].append(0)
+        self.freqs[0].append(note)
 
     def save_wav(self,  file_name):
         # Open up a wav file
@@ -80,7 +92,6 @@ class Waver:
             for channels_sample in samples:
                 sample = np.array(list(map(lambda x: int(x*32767.0), channels_sample )))
                 wav_file.writeframes(struct.pack('<'+'h'*nchannels, *sample))
-
 
 class WaveDecoder:
 
@@ -115,6 +126,7 @@ class WaveDecoder:
         self.chunk_ms = wv.default_ms
         self.nframes = len(self.samples)
 
+    # No funciona a bajas resoluciones :c
     def get_freq_chunk(self, chunk):
         transform = np.fft.fft(chunk)
         len_fft = len(transform)
@@ -128,7 +140,36 @@ class WaveDecoder:
         freq_in_hertz = abs(freq * self.sample_rate)
         return freq_in_hertz
 
+    # https://stackoverflow.com/a/42322656
+    def closest_freq_chunk(self, chunk):
+        waveform = np.array(chunk)
+        time_axis = np.linspace(0, self.chunk_ms/1000, len(chunk))
+
+        dt = time_axis[1] - time_axis[0]
+        freq_axis = np.fft.fftfreq(len(chunk), dt)
+        fft_wf = abs(np.fft.fft(waveform))
+
+        guess_freq = abs(freq_axis[np.argmax(fft_wf[1:])+1])  
+        guess_amp = np.std(waveform) * 2.**0.5
+        guess_offset = np.mean(waveform)
+        guess = np.array([guess_amp, 2.*np.pi*guess_freq, 0., guess_offset])
+        #print("guesses A: {} | omega: {} (f {})| c: {}".format(guess_amp,guess_freq, guess_freq/(2.*np.pi), guess_offset))
+
+        def sinfunc(t, A, w, p, c):  return A * np.sin(w*t + p) + c
+        popt, pcov = scipy.optimize.curve_fit(sinfunc, time_axis, waveform, p0=guess)
+        A, w, p, c = popt
+        #print("A: {} | omega: {} (f {})| p: {} | c: {}".format(A,w,w/(2.*np.pi),p,c))
+        #plt.plot(time_axis, chunk, linewidth=0.5)
+        #plt.plot(time_axis, A*np.sin(w*time_axis+p)+c, linewidth=0.5)
+        #plt.show()
+        f = w/(2.*np.pi)
+        return f
+
     def decode(self):
+        if self.samples is None:
+            raise Exception("No samples to decode. "
+                            "Load with open_wav or open_waver." )
+
         n_samples = int(self.chunk_ms * (self.sample_rate / 1000.0))
 
         start = 0
@@ -150,11 +191,13 @@ class WaveDecoder:
             if self.channels > 1:
                 chunk = np.transpose(chunk)
                 for ch in range(self.channels):
-                    freq_raw = self.get_freq_chunk(chunk[ch])
+                    print("channel %d ------------" % ch)
+                    #freq_raw = self.get_freq_chunk(chunk[ch])
+                    freq_raw = self.closest_freq_chunk(chunk[ch])
                     note = self.noter.get_closest_freq(freq_raw)
                     self.decoded_freqs[ch].append(note)
             else:
-                freq_raw = self.get_freq_chunk(chunk)
+                freq_raw = self.closest_freq_chunk(chunk)
                 note = self.noter.get_closest_freq(freq_raw)
                 self.decoded_freqs.append(note)
 

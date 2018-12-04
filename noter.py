@@ -1,3 +1,6 @@
+"""
+(c) G. Flores 2018, where applicable
+"""
 import functools
 
 class Noter:
@@ -29,6 +32,27 @@ class Noter:
 
     @functools.lru_cache(maxsize=128)
     def get_closest_freq(self, raw_freq):
+        print("raw_freq: %.2f" % raw_freq)
+        if raw_freq < 10:
+            return 0
+        old_freq = float(used_notes[0][1])
+        #print("raw_freq: %s" % repr(raw_freq))
+        for _, freq in used_notes:
+            #print("freq: %.2f\t-old_freq: %.2f" % (raw_freq, old_freq))
+            if freq < raw_freq:
+                old_freq = freq
+                continue
+            # >= (cruce)
+            print("cruce: ", end="")
+            if abs(raw_freq - freq) < abs(raw_freq - old_freq):
+                print("freq: %.2f" % freq)
+                return freq
+            print("oldfreq: %.2f" % old_freq)
+            return old_freq
+        return freq
+
+    @functools.lru_cache(maxsize=128)
+    def get_closest_freq_real(self, raw_freq):
         if raw_freq < 1:
             return 0
         old_freq = float(self.notes[0][1])
@@ -43,6 +67,8 @@ class Noter:
                 return freq
             return old_freq
         return freq
+
+# I know, this is lousy. Let me be.
 
 notes_list = [('C0', '16.35'),
              ('C#0', '17.32'),
@@ -240,4 +266,5 @@ used_notes = [('C1', 32.70),
              ('A#7', 3729.31),
              ('B7', 3951.07)]
 
-        
+used_notes_by_freq = dict([(x[1], x[0]) for x in used_notes])
+used_freqs = [x[1] for x in used_notes]
